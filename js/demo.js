@@ -7,13 +7,14 @@ const SUR = [...'김이박최정강조윤장임한오서신권황안송류홍'];
 const GIVEN = ['미자', '영희', '순자', '옥순', '정숙', '영자', '말순', '춘자', '경자', '명숙',
   '철수', '영수', '만수', '광호', '상철', '꽃님', '복례', '점순', '덕자', '숙자', '금순', '봉남'];
 
+// times: 요일별 수업 시간 (줌바댄스는 요일마다 시간이 다른 예)
 const PROGRAMS = [
-  { name: '노래교실', count: 112, days: [3], time: '14:00-15:30', teacher: '한경주', rate: 0.85 },
-  { name: '줌바댄스', count: 40, days: [1, 3], time: '10:40-11:30', teacher: '윤혜정', rate: 0.75 },
-  { name: '파워로빅', count: 30, days: [1, 3, 5], time: '09:30-10:20', teacher: '남현주', rate: 0.7 },
-  { name: '서예교실', count: 18, days: [2], time: '10:00-12:00', teacher: '박서연', rate: 0.8 },
-  { name: '스마트폰교실', count: 15, days: [4], time: '13:00-14:30', teacher: '이도윤', rate: 0.65 },
-];
+  { name: '노래교실', count: 112, times: { 3: '14:00-15:30' }, teacher: '한경주', rate: 0.85 },
+  { name: '줌바댄스', count: 40, times: { 1: '10:40-11:30', 3: '13:00-13:50' }, teacher: '윤혜정', rate: 0.75 },
+  { name: '파워로빅', count: 30, times: { 1: '09:30-10:20', 3: '09:30-10:20', 5: '09:30-10:20' }, teacher: '남현주', rate: 0.7 },
+  { name: '서예교실', count: 18, times: { 2: '10:00-12:00' }, teacher: '박서연', rate: 0.8 },
+  { name: '스마트폰교실', count: 15, times: { 4: '13:00-14:30' }, teacher: '이도윤', rate: 0.65 },
+].map((p) => ({ ...p, days: Object.keys(p.times).map(Number) }));
 
 // 매번 같은 결과가 나오는 난수 (새로 만들 때마다 seed를 바꿈)
 function rng(seed) {
@@ -46,7 +47,7 @@ export function makeDemoData(seed = Date.now()) {
   };
 
   PROGRAMS.forEach((p, i) => {
-    programs[p.name] = { days: p.days, time: p.time, teacher: p.teacher, off: offFor(p.days), color: i % PALETTE.length, u };
+    programs[p.name] = { days: p.days, times: { ...p.times }, teacher: p.teacher, off: offFor(p.days), color: i % PALETTE.length, u };
     const people = [];
     const seen = new Set();
     while (people.length < p.count) {
@@ -75,7 +76,7 @@ export function makeDemoData(seed = Date.now()) {
       const day = (records[key] ||= {});
       for (const m of Object.values(members)) {
         if (m.program !== p.name || rand() > rate) continue;
-        const [h, mm] = p.time.split('-')[0].split(':').map(Number);
+        const [h, mm] = p.times[d.getDay()].split('-')[0].split(':').map(Number);
         const t = h * 60 + mm - 20 + Math.floor(rand() * 25);
         day[m.id] = { t: `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`, u, by: '체험' };
       }

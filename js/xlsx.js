@@ -275,7 +275,8 @@ function sheetXml(sh) {
   out.push('<sheetViews><sheetView workbookViewId="0">');
   if (sh.freeze) {
     const [c, r] = sh.freeze;
-    out.push(`<pane xSplit="${c}" ySplit="${r}" topLeftCell="${colName(c)}${r + 1}" activePane="bottomRight" state="frozen"/>`);
+    const pane = c && r ? 'bottomRight' : r ? 'bottomLeft' : 'topRight';
+    out.push(`<pane${c ? ` xSplit="${c}"` : ''}${r ? ` ySplit="${r}"` : ''} topLeftCell="${colName(c)}${r + 1}" activePane="${pane}" state="frozen"/>`);
   }
   out.push('</sheetView></sheetViews><sheetFormatPr defaultRowHeight="16.5"/>');
   if (sh.cols?.length) {

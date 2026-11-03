@@ -1,6 +1,6 @@
 // 출석부 엑셀 만들기 (월별 또는 분기별)
 import { S, colName, writeXlsx } from './xlsx.js';
-import { state, membersOf, duplicateNames, getRecord, dateKey, parseDate, WEEKDAYS, exportData } from './store.js';
+import { state, membersOf, duplicateNames, getRecord, dateKey, parseDate, WEEKDAYS, exportData, scheduleText } from './store.js';
 import { backupSheet } from './roster.js';
 
 /** 기간 안의 수업 날짜: 수업 요일 + 실제 출석 기록이 있는 날 */
@@ -47,8 +47,7 @@ function programSheet(program, startMonth, months) {
   rows[0] = [{ v: `${program} 출석부 (${period})`, s: S.title }];
   merges.push(`A1:${lastColName}1`);
   const info = [
-    p.days?.length ? p.days.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => WEEKDAYS[d]).join(',') : '',
-    p.time,
+    scheduleText(p),
     p.teacher ? `${p.teacher} 강사` : '',
     `등록 ${members.filter((x) => x.active).length}명`,
   ].filter(Boolean);
@@ -139,6 +138,29 @@ export function rosterTemplate() {
         [{ v: '※ 생년월일·금액·결제 칸이 있어도 괜찮습니다. 출석부는 이름·전화번호·프로그램명만 읽습니다.', s: S.info }],
       ],
       cols: [14, 18, 18],
+    },
+  ]);
+}
+
+/** 수업 하나의 현재 명단 (명단 양식과 같은 모양) */
+export function rosterSheet(program) {
+  const members = membersOf(program);
+  const dup = duplicateNames(members);
+  return writeXlsx([
+    {
+      name: program,
+      rows: [
+        ['번호', '이름', '전화번호 뒷자리', '프로그램명', '비고'].map((v) => ({ v, s: S.header })),
+        ...members.map((m, i) => [
+          { v: i + 1, s: S.center },
+          { v: m.name, s: S.left },
+          { v: m.last4, s: S.center },
+          { v: program, s: S.left },
+          { v: [m.extra && '명단 외 추가', dup.has(m.name) && '동명이인'].filter(Boolean).join(', '), s: S.left },
+        ]),
+      ],
+      cols: [6, 14, 16, 18, 18],
+      freeze: [0, 1],
     },
   ]);
 }

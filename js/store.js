@@ -105,20 +105,24 @@ export function programNames() {
     .sort((a, b) => a.localeCompare(b, 'ko'));
 }
 
-// 수업별 색깔. 초록은 '출석 완료' 표시에 쓰므로 뺐다.
+// 수업별 색깔: 무지개 순서의 단색. ink = 그 색 위에 쓰는 글자색(밝은 색은 검정 글자)
+// 수업이 7개를 넘으면 뒤의 색을 이어서 쓴다.
 export const PALETTE = [
-  { name: '파랑', c: '#2860a8', bg: '#e6eef9' },
-  { name: '주황', c: '#c05a0e', bg: '#fcecdf' },
-  { name: '보라', c: '#7b3fa3', bg: '#f1e8f7' },
-  { name: '빨강', c: '#b4233f', bg: '#fbe6ea' },
-  { name: '청록', c: '#0d7377', bg: '#dff2f2' },
-  { name: '갈색', c: '#8a5a1c', bg: '#f5ecdf' },
-  { name: '남색', c: '#3a3f9e', bg: '#e8e9f8' },
-  { name: '분홍', c: '#b0367c', bg: '#fae6f1' },
+  { name: '빨강', c: '#d32f2f', ink: '#ffffff' },
+  { name: '주황', c: '#f57c00', ink: '#1f2421' },
+  { name: '노랑', c: '#fbc02d', ink: '#1f2421' },
+  { name: '초록', c: '#2e7d32', ink: '#ffffff' },
+  { name: '파랑', c: '#1565c0', ink: '#ffffff' },
+  { name: '남색', c: '#283593', ink: '#ffffff' },
+  { name: '보라', c: '#7b1fa2', ink: '#ffffff' },
+  { name: '분홍', c: '#c2185b', ink: '#ffffff' },
+  { name: '청록', c: '#00838f', ink: '#ffffff' },
+  { name: '갈색', c: '#6d4c41', ink: '#ffffff' },
+  { name: '회색', c: '#546e7a', ink: '#ffffff' },
 ];
 
 /** 다른 수업이 아직 안 쓰는 색 중 첫 번째 */
-function freeColor(except) {
+export function freeColor(except) {
   const used = new Set(programNames().filter((n) => n !== except).map((n) => state.programs[n].color));
   const i = PALETTE.findIndex((_, k) => !used.has(k));
   return i >= 0 ? i : programNames().length % PALETTE.length;
@@ -128,11 +132,34 @@ export function colorOf(name) {
   return PALETTE[state.programs[name]?.color ?? 0] || PALETTE[0];
 }
 
-export function ensureProgram(name) {
+export function ensureProgram(name, init = {}) {
   if (!state.programs[name] || state.programs[name].deleted) {
-    state.programs[name] = { days: [], time: '', teacher: '', off: [], color: freeColor(name), u: Date.now() };
+    state.programs[name] = { days: [], times: {}, teacher: '', off: [], color: freeColor(name), ...init, u: Date.now() };
   }
   return state.programs[name];
+}
+
+/** 새 수업 만들기 (명단 없이) */
+export function addProgram(name, init) {
+  const p = ensureProgram(name, init);
+  save();
+  return p;
+}
+
+/* 요일별 수업 시간: times = {요일번호: '10:40-11:30'}. 예전 데이터의 time 은 모든 요일 공통 시간으로 본다. */
+export function timeOn(p, weekday) {
+  return p?.times?.[weekday] || p?.time || '';
+}
+
+export const sortDays = (days = []) => days.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+
+/** '월·수 10:40-11:30' 또는 '월 10:40-11:30 · 수 14:00-15:30' */
+export function scheduleText(p) {
+  const days = sortDays(p?.days);
+  if (!days.length) return '';
+  const times = days.map((d) => timeOn(p, d));
+  if (times.every((t) => t === times[0])) return `${days.map((d) => WEEKDAYS[d]).join('·')}${times[0] ? ' ' + times[0] : ''}`;
+  return days.map((d, i) => `${WEEKDAYS[d]}${times[i] ? ' ' + times[i] : ''}`).join(' · ');
 }
 
 export function updateProgram(name, patch) {
@@ -167,6 +194,30 @@ export function addMember(program, name, last4, extra = false) {
   state.members[id] = { id, program, name, last4, active: true, extra, u: Date.now() };
   save();
   return state.members[id];
+}
+
+/**
+ * 이름·뒷자리 고치기. 출석 기록도 새 이름으로 옮긴다.
+ * 예전 칸은 '지움'으로 남겨서 다른 태블릿과 합칠 때도 고친 내용이 이긴다.
+ */
+export function renameMember(id, name, last4) {
+  const old = state.members[id];
+  if (!old) return null;
+  const newId = memberId(old.program, name, last4);
+  if (newId === id) return old;
+  if (state.members[newId]?.active) return false; // 같은 사람이 이미 있음
+  const now = Date.now();
+  state.members[newId] = { ...old, id: newId, name, last4, active: true, u: now };
+  Object.assign(old, { active: false, u: now });
+  for (const day of Object.values(state.records)) {
+    const r = day[id];
+    if (r && !r.x) {
+      day[newId] = { ...r, u: now };
+      day[id] = { x: 1, u: now };
+    }
+  }
+  save();
+  return state.members[newId];
 }
 
 export function removeMember(id) {
@@ -238,9 +289,10 @@ export function daySummary(date) {
     if (!scheduled && !present) continue;
     // 총 인원: 지금 명단 + 그날 출석했지만 지금은 명단에서 빠진 분
     const total = all.filter((m) => m.active || (day[m.id] && !day[m.id].x)).length;
-    out.push({ name, off: !!p.off?.includes(date), present, total });
+    out.push({ name, off: !!p.off?.includes(date), present, total, time: timeOn(p, weekday) });
   }
-  return out;
+  // 그날 수업 시간 순서로 (시간이 없으면 뒤로)
+  return out.sort((a, b) => (a.time || '99').localeCompare(b.time || '99') || a.name.localeCompare(b.name, 'ko'));
 }
 
 /* ---------- 다른 기기 기록 합치기 ---------- */

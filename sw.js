@@ -1,6 +1,6 @@
 // 와이파이가 끊겨도 출석 체크 화면이 열리도록 앱 파일을 기기에 보관한다.
 // 앱 파일을 수정해 다시 올릴 때는 VERSION 을 js/app.js 의 APP_VERSION 과 같이 올려 주세요.
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const FILES = [
   './',
   'index.html',

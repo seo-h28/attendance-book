@@ -32,13 +32,24 @@ button { cursor: pointer; touch-action: manipulation; }
 #app.fit { height: 100vh; height: 100dvh; overflow: hidden; }
 
 /* 수업 색깔: 출석 체크 화면 전체에 지금 어느 수업인지 드러나게 */
-#app.fit .top { background: var(--pc-bg); border-top: 10px solid var(--pc); border-bottom-color: var(--pc); }
-#app.fit .prog-btn { background: var(--pc); color: #fff; border-radius: 12px; padding: 6px 16px; }
-#app.fit .prog-btn small { color: rgba(255, 255, 255, 0.85); }
-#app.fit .querybar { border-color: var(--pc); }
-#app.fit .modes button[aria-pressed='true'] { background: var(--pc); border-color: var(--pc); }
-.prog-box { border-left: 10px solid var(--pc); }
-.prog-box h3 { color: var(--pc); }
+#app.fit .top { background: var(--pc); color: var(--pc-ink); border-bottom: none; }
+#app.fit .top .date, #app.fit .top .device, #app.fit .top .count b { color: inherit; }
+#app.fit .prog-btn { color: inherit; }
+#app.fit .prog-btn small { color: inherit; opacity: 0.8; }
+#app.fit .querybar { border-color: var(--pc); border-width: 3px; }
+#app.fit .modes button[aria-pressed='true'] { background: var(--pc); border-color: var(--pc); color: var(--pc-ink); }
+.prog-box { border-left: 12px solid var(--pc); }
+/* 수업 이름은 그 색 바탕의 이름표로 (노란색도 잘 읽히게) */
+.prog-box h3, .ci-head b, .color-preview {
+  display: inline-block;
+  width: fit-content;
+  background: var(--pc);
+  color: var(--pc-ink);
+  border-radius: 8px;
+  padding: 2px 12px;
+}
+.color-preview { margin-top: 8px; font-size: 20px; font-weight: 800; padding: 6px 16px; }
+.label { font-size: 15px; color: var(--muted); min-width: 64px; }
 .swatch {
   width: 42px;
   height: 42px;
@@ -46,13 +57,15 @@ button { cursor: pointer; touch-action: manipulation; }
   background: var(--sw);
   border: 3px solid var(--surface);
   box-shadow: 0 0 0 1.5px var(--line);
+  padding: 0;
 }
-.swatch[aria-pressed='true'] { box-shadow: 0 0 0 3px var(--ink); }
-.swatch[aria-pressed='true']::after { content: '✓'; color: #fff; font-weight: 900; font-size: 18px; }
+.swatch[aria-checked='true'] { box-shadow: 0 0 0 3px var(--ink); }
+.swatch[aria-checked='true']::after { content: '✓'; color: var(--sw-ink); font-weight: 900; font-size: 18px; }
 
 .btn {
   border: 1.5px solid var(--line);
   background: var(--surface);
+  color: var(--ink);
   border-radius: 12px;
   padding: 12px 18px;
   font-weight: 600;
@@ -211,10 +224,10 @@ button { cursor: pointer; touch-action: manipulation; }
   padding: 22px;
   text-align: left;
 }
-.picker .item { border-left: 14px solid var(--pc, var(--line)); background: var(--pc-bg, var(--surface)); }
-.picker .item.today { border-color: var(--pc, var(--primary)); }
-.picker .item b { display: block; font-size: 28px; color: var(--pc, var(--ink)); }
-.picker .item span { color: var(--muted); font-size: 17px; }
+.picker .item { background: var(--pc, var(--surface)); color: var(--pc-ink, var(--ink)); border-color: var(--pc, var(--line)); }
+.picker .item.today { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--pc); }
+.picker .item b { display: block; font-size: 28px; }
+.picker .item span { font-size: 17px; opacity: 0.9; }
 
 .picker .item .item-status {
   display: block;
@@ -223,7 +236,7 @@ button { cursor: pointer; touch-action: manipulation; }
   font-style: normal;
   font-weight: 700;
   font-size: 17px;
-  color: var(--pc, var(--ink));
+  color: var(--ink);
   background: var(--surface);
   border-radius: 8px;
   padding: 3px 10px;
@@ -268,7 +281,7 @@ button { cursor: pointer; touch-action: manipulation; }
   justify-content: space-between;
   column-gap: 4px;
   background: var(--pc);
-  color: #fff;
+  color: var(--pc-ink);
   border-radius: 6px;
   padding: 2px 6px;
   font-size: 13px;
@@ -285,14 +298,14 @@ button { cursor: pointer; touch-action: manipulation; }
 .cal-detail { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; }
 .cal-detail h2 { margin: 0; font-size: 22px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .today-badge { background: var(--ink); color: #fff; font-size: 14px; border-radius: 999px; padding: 2px 10px; }
-.cal-item { border-left: 8px solid var(--pc); background: var(--pc-bg); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.cal-item { border-left: 10px solid var(--pc); background: #f7f6f2; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .cal-item.off { border-left-color: #bbb; background: #f1f0ec; }
 .ci-head { display: flex; flex-direction: column; }
-.ci-head b { font-size: 21px; color: var(--pc); }
-.cal-item.off .ci-head b { color: var(--muted); }
+.ci-head b { font-size: 21px; }
+.cal-item.off .ci-head b { background: #ccc; color: var(--ink); }
 .ci-head span { font-size: 15px; color: var(--muted); }
 .ci-status { font-size: 19px; font-weight: 600; }
-.ci-status strong { font-size: 28px; color: var(--pc); }
+.ci-status strong { font-size: 28px; }
 .ci-status small { color: var(--muted); }
 .ci-status.muted { color: var(--muted); font-size: 17px; }
 .cal-item.off .ci-status { color: var(--warn); }
@@ -442,3 +455,52 @@ table.sheet tfoot td { font-weight: 700; background: #f7f7f4; }
   .keys.num { grid-template-columns: repeat(3, 1fr); }
   .panel { padding: 16px; }
 }
+
+/* ---------- 요일별 시간 ---------- */
+.schedule { display: flex; flex-direction: column; gap: 8px; }
+.time-rows { display: flex; flex-direction: column; gap: 6px; }
+.time-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.time-row b { min-width: 52px; }
+.time-row .input { min-height: 44px; padding: 6px 10px; }
+.form { display: flex; flex-direction: column; gap: 14px; }
+.form .field { color: var(--ink); font-weight: 600; font-size: 16px; }
+.import-row { padding: 6px 0; border-bottom: 1px solid var(--line); }
+
+/* ---------- 휴강일 고르기 달력 ---------- */
+.off-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.off-day {
+  min-height: 56px;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  background: none;
+  color: #bbb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+}
+.off-day.class-day { background: var(--surface); border-color: var(--pc); color: var(--ink); }
+.off-day.today { outline: 2px dashed var(--ink); outline-offset: -4px; }
+.off-day.on { background: #555; border-color: #555; color: #fff; }
+.off-day small { font-size: 12px; font-weight: 700; }
+
+/* ---------- 엑셀 모양 명단 ---------- */
+.modal.wide { width: min(980px, 100%); }
+.xl-wrap { overflow: auto; max-height: 58vh; border: 1px solid #bfbfbf; background: #fff; }
+table.xl { border-collapse: collapse; font-family: 'Malgun Gothic', var(--font); font-size: 15px; min-width: 100%; }
+table.xl th, table.xl td { border: 1px solid #d4d4d4; height: 34px; padding: 0; }
+table.xl tr.letters th { background: #f3f3f3; color: #666; font-weight: 400; font-size: 13px; height: 24px; position: sticky; top: 0; z-index: 2; }
+table.xl th.rn { background: #f3f3f3; color: #666; font-weight: 400; font-size: 13px; width: 40px; min-width: 40px; text-align: center; }
+table.xl th.hd { background: #eff3f0; font-weight: 700; padding: 0 8px; position: sticky; top: 24px; z-index: 1; white-space: nowrap; }
+table.xl td { padding: 0 8px; white-space: nowrap; }
+table.xl td:nth-child(2) { text-align: center; width: 48px; }
+table.xl td input { width: 100%; min-width: 90px; border: none; background: transparent; font: inherit; padding: 6px 2px; }
+table.xl td input:focus { outline: 2px solid #217346; background: #fff; }
+table.xl td.ro { color: var(--muted); }
+table.xl td.act { text-align: center; width: 60px; }
+table.xl td.act button { border: none; background: none; color: var(--danger); font-weight: 700; padding: 6px 8px; }
+table.xl td.act button.add { color: #217346; }
+table.xl tr.dup td { background: #fff8e1; }
+table.xl tr.new td { background: #f6fbf7; }

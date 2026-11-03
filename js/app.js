@@ -2,11 +2,11 @@ import { KEYPAD, matchName } from './hangul.js';
 import * as store from './store.js';
 import { state, WEEKDAYS, dateKey, dateLabel } from './store.js';
 import { readFile, parseRoster, findBackup } from './roster.js';
-import { buildBook, rosterTemplate, download, classDates } from './book.js';
+import { buildBook, rosterTemplate, rosterSheet, download, classDates } from './book.js';
 import { makeDemoData, DEMO_PIN } from './demo.js';
 
 // 코드를 고쳐 배포할 때마다 올린다 (sw.js 의 VERSION 과 같이)
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 /* ---------- 작은 도우미 ---------- */
 
@@ -37,18 +37,24 @@ function hideToast() {
 }
 
 /** 큰 버튼 대화상자. 누른 버튼의 value를 돌려준다. */
-function modal(title, body, buttons = [{ label: '확인', value: true, primary: true }]) {
+// 버튼 value 함수가 이 값을 돌려주면 창을 닫지 않는다 (입력 확인용)
+const KEEP_OPEN = Symbol('keep');
+
+function modal(title, body, buttons = [{ label: '확인', value: true, primary: true }], { wide = false } = {}) {
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
     const close = (v) => { overlay.remove(); resolve(v); };
     const overlay = h('div', { class: 'overlay', onclick: (e) => e.target === overlay && close(null) },
-      h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true' },
+      h('div', { class: 'modal' + (wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true' },
         title && h('h2', {}, title),
         typeof body === 'string' ? h('div', { class: 'msg' }, body) : body,
         h('div', { class: 'actions' },
           buttons.map((b) => h('button', {
             class: 'btn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : ''),
-            onclick: () => close(typeof b.value === 'function' ? b.value() : b.value),
+            onclick: () => {
+              const v = typeof b.value === 'function' ? b.value() : b.value;
+              if (v !== KEEP_OPEN) close(v);
+            },
           }, b.label)))));
     root.append(overlay);
   });
@@ -95,12 +101,62 @@ const fmtTime = (ms) => {
   const d = new Date(ms);
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${store.timeStr(d)}`;
 };
-const colorVars = (program) => {
-  const c = store.colorOf(program);
-  return `--pc:${c.c};--pc-bg:${c.bg}`;
-};
-const daysText = (days = []) =>
-  days.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => WEEKDAYS[d]).join('·');
+const paletteVars = (c) => `--pc:${c.c};--pc-ink:${c.ink}`;
+const colorVars = (program) => paletteVars(store.colorOf(program));
+const daysText = (days = []) => store.sortDays(days).map((d) => WEEKDAYS[d]).join('·');
+
+/** 무지개 색 고르기 동그라미. onPick(i) */
+function swatches(selected, onPick) {
+  const wrap = h('div', { class: 'chips', role: 'radiogroup', 'aria-label': '수업 색깔' });
+  const draw = (sel) => wrap.replaceChildren(...store.PALETTE.map((c, i) => h('button', {
+    type: 'button', class: 'swatch', style: `--sw:${c.c};--sw-ink:${c.ink}`, title: c.name, 'aria-label': `${c.name}색`,
+    role: 'radio', 'aria-checked': String(sel === i),
+    onclick: () => { draw(i); onPick(i); },
+  })));
+  draw(selected);
+  return wrap;
+}
+
+/**
+ * 요일 고르기 + 요일별 시간. 바뀔 때마다 onChange({days, times})
+ * 새 요일을 고르면 앞서 정한 시간을 그대로 채워 준다.
+ */
+function scheduleEditor(init, onChange) {
+  let days = [...(init.days || [])];
+  const times = {};
+  for (const d of days) times[d] = store.timeOn(init, d);
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  const chips = h('div', { class: 'chips' });
+  const rows = h('div', { class: 'time-rows' });
+  const emit = () => onChange({ days: store.sortDays(days), times: Object.fromEntries(days.map((d) => [d, times[d] || ''])) });
+  const timeInputs = (d) => {
+    const [s = '', e = ''] = (times[d] || '').split('-');
+    const start = h('input', { type: 'time', class: 'input', value: s, 'aria-label': `${WEEKDAYS[d]}요일 시작 시간` });
+    const end = h('input', { type: 'time', class: 'input', value: e, 'aria-label': `${WEEKDAYS[d]}요일 끝 시간` });
+    const update = () => { times[d] = start.value || end.value ? `${start.value}-${end.value}` : ''; emit(); };
+    start.addEventListener('change', update);
+    end.addEventListener('change', update);
+    return h('div', { class: 'time-row' }, h('b', {}, `${WEEKDAYS[d]}요일`), start, h('span', {}, '~'), end);
+  };
+  const draw = () => {
+    chips.replaceChildren(...order.map((d) => h('button', {
+      type: 'button', class: 'chip', 'aria-pressed': String(days.includes(d)),
+      onclick: () => {
+        if (days.includes(d)) days = days.filter((x) => x !== d);
+        else {
+          days.push(d);
+          times[d] ||= Object.values(times).find(Boolean) || '';
+        }
+        draw();
+        emit();
+      },
+    }, WEEKDAYS[d])));
+    rows.replaceChildren(...store.sortDays(days).map(timeInputs));
+    if (!days.length) rows.append(h('p', { class: 'help', style: 'margin:0' }, '수업 요일을 고르면 요일마다 시간을 정할 수 있습니다.'));
+  };
+  draw();
+  return h('div', { class: 'schedule' }, chips, rows);
+}
 
 /* ---------- 화면 상태 ---------- */
 
@@ -138,11 +194,15 @@ function demoBanner() {
     h('button', { class: 'btn small', onclick: () => { location.href = location.pathname; } }, '체험 끝내기'));
 }
 
+let lastScreen = '';
 function render() {
   const today = dateKey();
   app.classList.remove('fit');
   app.style.cssText = '';
-  window.scrollTo(0, 0);
+  // 같은 화면을 다시 그릴 때(요일 선택 등)는 스크롤 위치를 그대로 둔다
+  const screen = `${ui.view}|${ui.tab}`;
+  if (screen !== lastScreen) window.scrollTo(0, 0);
+  lastScreen = screen;
   if (ui.view === 'admin') return renderAdmin();
   if (!store.programNames().length) return renderWelcome();
   if (ui.view === 'calendar') return renderCalendar(today);
@@ -170,7 +230,9 @@ function renderWelcome() {
 function renderPicker(today) {
   const wd = new Date().getDay();
   const names = store.programNames();
-  const todays = names.filter((n) => state.programs[n].days?.includes(wd));
+  // 오늘 수업은 시작 시간 순서로
+  const todays = names.filter((n) => state.programs[n].days?.includes(wd))
+    .sort((a, b) => store.timeOn(state.programs[a], wd).localeCompare(store.timeOn(state.programs[b], wd)));
   const others = names.filter((n) => !todays.includes(n));
   const summary = Object.fromEntries(store.daySummary(today).map((s) => [s.name, s]));
   const item = (n, isToday) => {
@@ -179,7 +241,7 @@ function renderPicker(today) {
     const s = summary[n];
     return h('button', { class: 'item' + (isToday ? ' today' : ''), style: colorVars(n), onclick: () => { ui.program = n; ui.view = 'check'; ui.query = ''; render(); } },
       h('b', {}, n),
-      h('span', {}, [daysText(p.days), p.time, `${count}명`].filter(Boolean).join('  ·  ')),
+      h('span', {}, [isToday ? store.timeOn(p, wd) : store.scheduleText(p), `${count}명`].filter(Boolean).join('  ·  ')),
       isToday && s && h('em', { class: 'item-status' + (s.off ? ' off' : '') }, s.off ? '오늘 휴강' : `오늘 ${s.present} / ${s.total}명 출석`));
   };
   mount(
@@ -248,7 +310,7 @@ function renderCalendar(today) {
         return h('div', { class: 'cal-item' + (s.off ? ' off' : ''), style: colorVars(s.name) },
           h('div', { class: 'ci-head' },
             h('b', {}, s.name),
-            h('span', {}, [p.time, p.teacher && `${p.teacher} 강사`].filter(Boolean).join(' · '))),
+            h('span', {}, [store.timeOn(p, store.parseDate(sel).getDay()), p.teacher && `${p.teacher} 강사`].filter(Boolean).join(' · '))),
           s.off ? h('div', { class: 'ci-status' }, '휴강')
             : past ? [
               h('div', { class: 'ci-status' }, h('strong', {}, s.present), ` / ${s.total}명 출석`, h('small', {}, ` (${rate}%)`)),
@@ -486,15 +548,30 @@ async function importFile() {
   if (!programs.length) return modal('명단을 찾지 못했습니다', '엑셀 첫 부분에 "이름"과 "전화번호" 제목 칸이 있는지 확인해 주세요.\n[빈 명단 양식 받기]로 받은 양식을 쓰면 가장 확실합니다.' + (notes.length ? '\n\n' + notes.join('\n') : ''));
 
   const checks = {};
+  const colors = {};
+  // 새 수업에는 아직 안 쓴 색을 무지개 순서로 미리 골라 둔다 (바꿀 수 있음)
+  const used = new Set(store.programNames().map((n) => state.programs[n].color));
+  const nextColor = () => {
+    const i = store.PALETTE.findIndex((_, k) => !used.has(k));
+    const c = i >= 0 ? i : used.size % store.PALETTE.length;
+    used.add(c);
+    return c;
+  };
   const body = h('div', {},
     h('p', { class: 'help' }, `'${file.name}'에서 찾은 수업입니다. 체크한 수업은 명단이 이 파일 내용으로 바뀝니다. 지난 출석 기록은 그대로 남습니다.`),
     h('div', { style: 'display:flex;flex-direction:column;gap:8px;margin:12px 0' },
       programs.map((p) => {
+        const exists = state.programs[p] && !state.programs[p].deleted;
         const before = store.membersOf(p).length;
         const cb = h('input', { type: 'checkbox', checked: true, style: 'width:24px;height:24px' });
         checks[p] = cb;
-        return h('label', { style: 'display:flex;gap:12px;align-items:center;font-size:19px;padding:6px 0' },
-          cb, h('b', {}, p), h('span', { class: 'help', style: 'margin:0' }, `${roster[p].length}명` + (state.programs[p] && !state.programs[p].deleted ? ` (지금 ${before}명)` : ' (새 수업)')));
+        if (!exists) colors[p] = nextColor();
+        return h('div', { class: 'import-row' },
+          h('label', { style: 'display:flex;gap:12px;align-items:center;font-size:19px' },
+            cb, h('b', {}, p), h('span', { class: 'help', style: 'margin:0' }, `${roster[p].length}명` + (exists ? ` (지금 ${before}명)` : ' (새 수업)'))),
+          !exists && h('div', { class: 'row', style: 'margin:4px 0 0 36px' },
+            h('span', { class: 'help', style: 'margin:0' }, '색깔'),
+            swatches(colors[p], (i) => (colors[p] = i))));
       })),
     notes.length && h('div', { class: 'notes' }, notes.map((n) => h('div', {}, '• ' + n))),
     h('p', { class: 'help' }, '생년월일·금액·결제 정보는 읽지 않고, 전화번호도 뒷 4자리만 이 기기에 저장합니다.'));
@@ -502,6 +579,7 @@ async function importFile() {
   if (!ok) return;
   const chosen = Object.fromEntries(programs.filter((p) => checks[p].checked).map((p) => [p, roster[p]]));
   if (!Object.keys(chosen).length) return;
+  for (const p of Object.keys(chosen)) if (p in colors) store.ensureProgram(p, { color: colors[p] });
   const r = store.applyRoster(chosen);
   toast(`명단 적용 완료 (추가 ${r.added}명, 빠짐 ${r.removed}명)`, { info: true });
   render();
@@ -529,6 +607,7 @@ function tabRoster(panel) {
       h('p', {}, '분기나 달이 바뀌어 명단이 달라지면 새 명단 파일을 다시 불러오면 됩니다.'),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: importFile }, '명단 엑셀 불러오기'),
+        h('button', { class: 'btn', onclick: addProgramDialog }, '+ 수업 직접 추가'),
         h('button', { class: 'btn', onclick: () => download(rosterTemplate(), '출석부_명단양식.xlsx') }, '빈 명단 양식 받기'))));
 
   const names = store.programNames();
@@ -537,51 +616,70 @@ function tabRoster(panel) {
   for (const name of names) panel.append(programBox(name));
 }
 
+/** 수업 직접 추가: 이름, 색깔, 요일별 시간, 강사 */
+async function addProgramDialog() {
+  let color = store.freeColor();
+  let schedule = { days: [], times: {} };
+  const nameInput = h('input', { class: 'input', placeholder: '예: 노래교실 수요반', maxlength: '30', style: 'width:100%' });
+  const teacherInput = h('input', { class: 'input', placeholder: '강사 이름 (선택)', maxlength: '20' });
+  const err = h('div', { class: 'pin-err', style: 'text-align:left' });
+  const preview = h('div', { class: 'color-preview' });
+  const drawPreview = () => {
+    preview.style.cssText = paletteVars(store.PALETTE[color]);
+    preview.textContent = nameInput.value.trim() || '수업 이름';
+  };
+  nameInput.addEventListener('input', drawPreview);
+  drawPreview();
+  const body = h('div', { class: 'form' },
+    h('label', { class: 'field' }, '수업 이름', nameInput),
+    h('div', { class: 'field' }, '수업 색깔', swatches(color, (i) => { color = i; drawPreview(); }), preview),
+    h('div', { class: 'field' }, '수업 요일과 시간', scheduleEditor(schedule, (s) => (schedule = s))),
+    h('label', { class: 'field' }, '강사', teacherInput),
+    h('p', { class: 'help' }, '명단은 추가한 뒤 [명단 보기 · 고치기]에서 한 분씩 넣거나, 명단 엑셀을 불러와 채웁니다.'),
+    err);
+  setTimeout(() => nameInput.focus(), 50);
+  const ok = await modal('수업 추가', body, [
+    { label: '취소', value: false },
+    { label: '수업 추가', primary: true, value: () => {
+      const name = nameInput.value.trim().replace(/\s+/g, ' ');
+      if (!name) { err.textContent = '수업 이름을 적어 주세요.'; return KEEP_OPEN; }
+      if (store.programNames().includes(name)) { err.textContent = '같은 이름의 수업이 이미 있습니다.'; return KEEP_OPEN; }
+      store.addProgram(name, { color, ...schedule, teacher: teacherInput.value.trim() });
+      return name;
+    } },
+  ]);
+  if (ok) { toast(`'${ok}' 수업을 추가했습니다`, { info: true }); render(); }
+}
+
 function programBox(name) {
   const p = state.programs[name];
   const members = store.membersOf(name);
   const extra = members.filter((m) => m.extra).length;
-  const offInput = h('input', { type: 'date', class: 'input' });
-  const timeInput = h('input', { class: 'input', value: p.time || '', placeholder: '예: 14:00-15:30', onchange: (e) => store.updateProgram(name, { time: e.target.value.trim() }) });
+  const box = h('div', { class: 'box prog-box', style: colorVars(name) });
   const teacherInput = h('input', { class: 'input', value: p.teacher || '', placeholder: '강사 이름', onchange: (e) => store.updateProgram(name, { teacher: e.target.value.trim() }) });
-  const order = [1, 2, 3, 4, 5, 6, 0];
-  return h('div', { class: 'box prog-box', style: colorVars(name) },
+  const upcomingOff = (p.off || []).filter((d) => d >= dateKey());
+  box.append(
     h('div', { class: 'prog-head' },
       h('h3', {}, name),
       h('span', { class: 'cnt' }, `${members.length}명` + (extra ? ` (명단 외 추가 ${extra}명)` : ''))),
     h('div', { class: 'row' },
-      h('span', { class: 'help', style: 'margin:0' }, '수업 색깔'),
-      h('div', { class: 'chips' },
-        store.PALETTE.map((c, i) => h('button', {
-          class: 'swatch', style: `--sw:${c.c}`, title: c.name, 'aria-label': `${c.name}색`,
-          'aria-pressed': String((p.color ?? 0) === i),
-          onclick: () => { store.updateProgram(name, { color: i }); render(); },
-        })))),
+      h('span', { class: 'label' }, '수업 색깔'),
+      swatches(p.color ?? 0, (i) => {
+        store.updateProgram(name, { color: i });
+        box.style.cssText = colorVars(name);
+      })),
+    h('div', { class: 'row', style: 'align-items:flex-start' },
+      h('span', { class: 'label' }, '요일·시간'),
+      scheduleEditor(p, (s) => store.updateProgram(name, { ...s, time: '' }))),
     h('div', { class: 'row' },
-      h('span', { class: 'help', style: 'margin:0' }, '수업 요일'),
-      h('div', { class: 'chips' },
-        order.map((d) => h('button', {
-          class: 'chip', 'aria-pressed': String(p.days.includes(d)),
-          onclick: () => {
-            const days = p.days.includes(d) ? p.days.filter((x) => x !== d) : [...p.days, d];
-            store.updateProgram(name, { days });
-            render();
-          },
-        }, WEEKDAYS[d])))),
+      h('span', { class: 'label' }, '강사'), teacherInput),
     h('div', { class: 'row' },
-      h('label', { class: 'field' }, '시간', timeInput),
-      h('label', { class: 'field' }, '강사', teacherInput)),
-    h('div', { class: 'row' },
-      h('span', { class: 'help', style: 'margin:0' }, '휴강일'),
-      offInput,
-      h('button', { class: 'btn small', onclick: () => {
-        if (!offInput.value || p.off.includes(offInput.value)) return;
-        store.updateProgram(name, { off: [...p.off, offInput.value].sort() });
-        render();
-      } }, '추가'),
-      h('div', { class: 'chips' },
-        (p.off || []).map((d) => h('span', { class: 'tag' }, d.slice(5).replace('-', '/'),
-          h('button', { 'aria-label': '휴강 해제', onclick: () => { store.updateProgram(name, { off: p.off.filter((x) => x !== d) }); render(); } }, '✕'))))),
+      h('span', { class: 'label' }, '휴강일'),
+      h('button', { class: 'btn small', onclick: () => offDaysDialog(name) }, '달력에서 고르기'),
+      h('span', { class: 'help', style: 'margin:0' },
+        upcomingOff.length
+          ? `다가오는 휴강 ${upcomingOff.length}일: ${upcomingOff.slice(0, 6).map((d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`).join(', ')}${upcomingOff.length > 6 ? ' …' : ''}`
+          : '다가오는 휴강일 없음')),
     h('div', { class: 'row' },
       h('button', { class: 'btn small', onclick: () => memberDialog(name) }, '명단 보기 · 고치기'),
       h('button', { class: 'btn small danger', onclick: async () => {
@@ -590,34 +688,164 @@ function programBox(name) {
           render();
         }
       } }, '수업 삭제')));
+  return box;
 }
 
-function memberDialog(program) {
-  const list = h('div', { class: 'member-list' });
+/** 달력에서 휴강일 여러 날을 한 번에 고르기 */
+async function offDaysDialog(name) {
+  const p = state.programs[name];
+  const picked = new Set(p.off || []);
+  const hasDays = p.days?.length > 0;
+  let month = dateKey().slice(0, 7);
+  const title = h('b', {});
+  const grid = h('div', { class: 'off-grid' });
+  const summary = h('p', { class: 'help' });
   const draw = () => {
-    const members = store.membersOf(program);
-    const dup = store.duplicateNames(members);
-    list.replaceChildren(...members.map((m) => h('div', {},
-      h('span', {}, m.name, (dup.has(m.name) || m.extra) && m.last4 ? ` (${m.last4})` : '', m.extra ? ' · 명단 외 추가' : ''),
-      h('button', { class: 'btn small danger', onclick: async () => {
-        if (await confirmBox('명단에서 빼기', `${m.name} 님을 ${program} 명단에서 뺄까요?\n지난 출석 기록은 남습니다.`, '빼기', true)) { store.removeMember(m.id); draw(); }
-      } }, '빼기'))));
-    if (!members.length) list.append(h('div', {}, '명단이 비어 있습니다.'));
+    const [y, m] = month.split('-').map(Number);
+    title.textContent = `${y}년 ${m}월`;
+    const startPad = new Date(y, m - 1, 1).getDay();
+    const last = new Date(y, m, 0).getDate();
+    const cells = WEEKDAYS.map((w, i) => h('div', { class: 'cal-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '') }, w));
+    for (let i = 0; i < startPad; i++) cells.push(h('div'));
+    for (let d = 1; d <= last; d++) {
+      const key = `${month}-${String(d).padStart(2, '0')}`;
+      const wd = (startPad + d - 1) % 7;
+      const classDay = !hasDays || p.days.includes(wd);
+      cells.push(h('button', {
+        type: 'button',
+        class: 'off-day' + (classDay ? ' class-day' : '') + (picked.has(key) ? ' on' : '') + (key === dateKey() ? ' today' : ''),
+        disabled: !classDay && !picked.has(key),
+        'aria-pressed': String(picked.has(key)),
+        'aria-label': `${dateLabel(key)}${picked.has(key) ? ' 휴강' : ''}`,
+        onclick: () => { picked.has(key) ? picked.delete(key) : picked.add(key); draw(); },
+      }, h('span', {}, d), picked.has(key) && h('small', {}, '휴강')));
+    }
+    grid.replaceChildren(...cells);
+    const inMonth = [...picked].filter((k) => k.startsWith(month)).length;
+    summary.textContent = `이 달 휴강 ${inMonth}일 · 전체 ${picked.size}일 선택됨`;
+  };
+  const shift = (delta) => {
+    const [y, m] = month.split('-').map(Number);
+    month = dateKey(new Date(y, m - 1 + delta, 1)).slice(0, 7);
+    draw();
   };
   draw();
-  const nm = h('input', { class: 'input', placeholder: '이름', style: 'flex:1;min-width:120px' });
-  const tail = h('input', { class: 'input', placeholder: '뒷 4자리', inputmode: 'numeric', maxlength: '4', style: 'width:130px' });
-  const body = h('div', {}, list,
-    h('div', { class: 'row' }, nm, tail,
-      h('button', { class: 'btn small primary', onclick: () => {
-        const n = nm.value.trim().replace(/\s+/g, ' ');
-        const t = tail.value.replace(/\D/g, '');
-        if (!n) return;
-        store.addMember(program, n, t.length === 4 ? t : '');
-        nm.value = ''; tail.value = '';
+  const body = h('div', { style: colorVars(name) },
+    h('p', { class: 'help' }, hasDays
+      ? `${store.scheduleText(p)} 수업 날짜만 고를 수 있습니다. 휴강할 날을 모두 누른 뒤 [저장]을 누르세요. 다시 누르면 취소됩니다.`
+      : '휴강할 날을 모두 누른 뒤 [저장]을 누르세요. 수업 요일을 정해 두면 수업 날짜만 고를 수 있어 더 편합니다.'),
+    h('div', { class: 'cal-nav', style: 'justify-content:center;margin:8px 0' },
+      h('button', { type: 'button', class: 'btn small', 'aria-label': '이전 달', onclick: () => shift(-1) }, '‹'),
+      title,
+      h('button', { type: 'button', class: 'btn small', 'aria-label': '다음 달', onclick: () => shift(1) }, '›')),
+    grid,
+    summary);
+  const ok = await modal(`${name} 휴강일`, body, [{ label: '취소', value: false }, { label: '저장', value: true, primary: true }]);
+  if (!ok) return;
+  store.updateProgram(name, { off: [...picked].sort() });
+  toast(`휴강일 ${picked.size}일로 저장했습니다`, { info: true });
+  render();
+}
+
+/** 명단을 엑셀 화면처럼 보여 주고, 칸을 눌러 바로 고친다 */
+function memberDialog(program) {
+  const filter = h('input', { class: 'input', placeholder: '이름 찾기 (초성도 됨: ㄱㅁㅈ)', style: 'flex:1;min-width:160px' });
+  const count = h('span', { class: 'help', style: 'margin:0' });
+  const tbody = h('tbody');
+  const err = h('div', { class: 'pin-err', style: 'text-align:left' });
+
+  const cellInput = (value, attrs, commit) => {
+    const input = h('input', { value, ...attrs });
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && input.blur());
+    input.addEventListener('change', () => commit(input));
+    return input;
+  };
+
+  const draw = () => {
+    const all = store.membersOf(program);
+    const dup = store.duplicateNames(all);
+    const q = filter.value.trim();
+    const rows = q ? all.filter((m) => matchName(m.name, q)) : all;
+    count.textContent = q ? `${rows.length}명 / 전체 ${all.length}명` : `전체 ${all.length}명`;
+    tbody.replaceChildren(...rows.map((m) => {
+      const n = all.indexOf(m) + 1;
+      const save = (nameEl, tailEl) => {
+        const name = nameEl.value.trim().replace(/\s+/g, ' ');
+        const tail = tailEl.value.replace(/\D/g, '');
+        if (!name || (tail && tail.length !== 4)) {
+          err.textContent = !name ? '이름은 비울 수 없습니다.' : '전화번호 뒷자리는 숫자 4자리로 적어 주세요.';
+          nameEl.value = m.name; tailEl.value = m.last4;
+          return;
+        }
+        const r = store.renameMember(m.id, name, tail);
+        if (r === false) {
+          err.textContent = `${name}${tail ? `(${tail})` : ''} 님이 이미 명단에 있습니다.`;
+          nameEl.value = m.name; tailEl.value = m.last4;
+          return;
+        }
+        err.textContent = '';
         draw();
-      } }, '추가')));
-  modal(`${program} 명단`, body, [{ label: '닫기', value: true, primary: true }]).then(render);
+      };
+      let nameEl;
+      let tailEl;
+      nameEl = cellInput(m.name, { 'aria-label': `${n}행 이름`, maxlength: '20' }, () => save(nameEl, tailEl));
+      tailEl = cellInput(m.last4, { 'aria-label': `${n}행 전화번호 뒷자리`, inputmode: 'numeric', maxlength: '4' }, () => save(nameEl, tailEl));
+      return h('tr', { class: dup.has(m.name) ? 'dup' : '' },
+        h('th', { class: 'rn' }, n + 1),
+        h('td', {}, n),
+        h('td', {}, nameEl),
+        h('td', {}, tailEl),
+        h('td', { class: 'ro' }, program),
+        h('td', { class: 'ro' }, [m.extra && '명단 외 추가', dup.has(m.name) && '동명이인'].filter(Boolean).join(', ')),
+        h('td', { class: 'act' }, h('button', { type: 'button', 'aria-label': `${m.name} 명단에서 빼기`, onclick: async () => {
+          if (await confirmBox('명단에서 빼기', `${m.name} 님을 ${program} 명단에서 뺄까요?\n지난 출석 기록은 남습니다.`, '빼기', true)) { store.removeMember(m.id); draw(); }
+        } }, '빼기')));
+    }));
+    // 맨 아래 빈 줄: 새로 추가
+    const nm = h('input', { placeholder: '새 이름', 'aria-label': '추가할 이름', maxlength: '20' });
+    const tl = h('input', { placeholder: '뒷 4자리', 'aria-label': '추가할 분 전화번호 뒷자리', inputmode: 'numeric', maxlength: '4' });
+    const add = () => {
+      const name = nm.value.trim().replace(/\s+/g, ' ');
+      const tail = tl.value.replace(/\D/g, '');
+      if (!name) return;
+      if (tail && tail.length !== 4) { err.textContent = '전화번호 뒷자리는 숫자 4자리로 적어 주세요.'; return; }
+      if (state.members[store.memberId(program, name, tail)]?.active) { err.textContent = '이미 명단에 있는 분입니다.'; return; }
+      store.addMember(program, name, tail);
+      err.textContent = '';
+      filter.value = '';
+      draw();
+      tbody.querySelector('tr.new input')?.focus();
+    };
+    [nm, tl].forEach((el) => el.addEventListener('keydown', (e) => e.key === 'Enter' && add()));
+    tbody.append(h('tr', { class: 'new' },
+      h('th', { class: 'rn' }, '+'),
+      h('td', {}, ''),
+      h('td', {}, nm),
+      h('td', {}, tl),
+      h('td', { class: 'ro' }, program),
+      h('td', { class: 'ro' }, ''),
+      h('td', { class: 'act' }, h('button', { type: 'button', class: 'add', onclick: add }, '추가'))));
+  };
+  filter.addEventListener('input', draw);
+  draw();
+
+  const cols = ['', 'A', 'B', 'C', 'D', 'E', ''];
+  const body = h('div', {},
+    h('p', { class: 'help' }, '명단 엑셀과 같은 모양입니다. 이름이나 뒷자리 칸을 눌러 고치면 바로 저장되고, 그분의 지난 출석 기록도 함께 옮겨집니다. 맨 아래 줄에서 새로 추가합니다.'),
+    h('div', { class: 'row', style: 'margin:0 0 8px' }, filter, count,
+      h('button', { type: 'button', class: 'btn small', onclick: () => download(rosterSheet(program), `${store.isDemo ? '체험_' : ''}명단_${program}.xlsx`) }, '엑셀로 받기')),
+    h('div', { class: 'xl-wrap' },
+      h('table', { class: 'xl' },
+        h('thead', {},
+          h('tr', { class: 'letters' }, cols.map((c) => h('th', {}, c))),
+          h('tr', {},
+            h('th', { class: 'rn' }, '1'),
+            ['번호', '이름', '전화번호 뒷자리', '프로그램명', '비고'].map((t) => h('th', { class: 'hd' }, t)),
+            h('th', { class: 'hd' }, ''))),
+        tbody)),
+    err,
+    h('p', { class: 'help' }, '이 기기에는 이름·뒷자리·수업만 저장되므로 원본 엑셀의 생년월일·금액·결제 칸은 나오지 않습니다.'));
+  modal(`${program} 명단`, body, [{ label: '닫기', value: true, primary: true }], { wide: true }).then(render);
 }
 
 function tabGrid(panel) {
