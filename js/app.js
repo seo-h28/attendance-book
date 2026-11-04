@@ -2,11 +2,12 @@ import { KEYPAD, matchName } from './hangul.js';
 import * as store from './store.js';
 import { state, WEEKDAYS, dateKey, dateLabel } from './store.js';
 import { readFile, parseRoster, findBackup } from './roster.js';
-import { buildBook, rosterTemplate, rosterSheet, download, classDates } from './book.js';
+import { buildBook, rosterTemplate, rosterSheet, download, classDates, sessions } from './book.js';
 import { makeDemoData, DEMO_PIN } from './demo.js';
+import { holidayName, HOLIDAYS, HOLIDAYS_UNTIL } from './holidays.js';
 
 // 코드를 고쳐 배포할 때마다 올린다 (sw.js 의 VERSION 과 같이)
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 /* ---------- 작은 도우미 ---------- */
 
@@ -103,6 +104,8 @@ const fmtTime = (ms) => {
 };
 const paletteVars = (c) => `--pc:${c.c};--pc-ink:${c.ink}`;
 const colorVars = (program) => paletteVars(store.colorOf(program));
+const offShort = (reason) => (reason === '휴강' ? '휴강' : '공휴일');
+const offLong = (reason) => (reason === '휴강' ? '휴강' : `휴강 · ${reason}`);
 const daysText = (days = []) => store.sortDays(days).map((d) => WEEKDAYS[d]).join('·');
 
 /** 무지개 색 고르기 동그라미. onPick(i) */
@@ -242,7 +245,7 @@ function renderPicker(today) {
     return h('button', { class: 'item' + (isToday ? ' today' : ''), style: colorVars(n), onclick: () => { ui.program = n; ui.view = 'check'; ui.query = ''; render(); } },
       h('b', {}, n),
       h('span', {}, [isToday ? store.timeOn(p, wd) : store.scheduleText(p), `${count}명`].filter(Boolean).join('  ·  ')),
-      isToday && s && h('em', { class: 'item-status' + (s.off ? ' off' : '') }, s.off ? '오늘 휴강' : `오늘 ${s.present} / ${s.total}명 출석`));
+      isToday && s && h('em', { class: 'item-status' + (s.off ? ' off' : '') }, s.off ? `오늘 ${offLong(s.reason)}` : `오늘 ${s.present} / ${s.total}명 출석`));
   };
   mount(
     h('header', { class: 'top' },
@@ -273,6 +276,13 @@ function shiftMonth(delta) {
   render();
 }
 
+/** '11월 수업 8회 중 3번째' */
+function sessionLabel(program, date) {
+  const { held } = sessions(program, date.slice(0, 7), 1);
+  const i = held.indexOf(date);
+  return i >= 0 ? `${Number(date.slice(5, 7))}월 수업 ${held.length}회 중 ${i + 1}번째` : '';
+}
+
 function renderCalendar(today) {
   const [y, m] = ui.calMonth.split('-').map(Number);
   const startPad = new Date(y, m - 1, 1).getDay();
@@ -286,15 +296,16 @@ function renderCalendar(today) {
     const key = `${ui.calMonth}-${String(d).padStart(2, '0')}`;
     const wd = (startPad + d - 1) % 7;
     const done = key <= today;
+    const hol = holidayName(key);
     cells.push(h('button', {
-      class: 'cal-cell' + (key === today ? ' today' : '') + (key === sel ? ' sel' : '') + (wd === 0 ? ' sun' : wd === 6 ? ' sat' : ''),
+      class: 'cal-cell' + (key === today ? ' today' : '') + (key === sel ? ' sel' : '') + (wd === 0 || hol ? ' sun' : wd === 6 ? ' sat' : ''),
       'aria-label': dateLabel(key),
       onclick: () => { ui.calDay = key; render(); },
     },
-      h('span', { class: 'cal-d' }, d),
+      h('span', { class: 'cal-d' }, d, hol && h('span', { class: 'cal-hol' }, hol)),
       store.daySummary(key).map((s) => h('span', { class: 'cal-pill' + (s.off ? ' off' : ''), style: colorVars(s.name) },
         h('span', { class: 'nm' }, s.name),
-        h('span', { class: 'st' }, s.off ? '휴강' : done ? `${s.present}/${s.total}` : '')))));
+        h('span', { class: 'st' }, s.off ? offShort(s.reason) : done ? `${s.present}/${s.total}` : '')))));
   }
 
   const list = store.daySummary(sel);
@@ -302,6 +313,7 @@ function renderCalendar(today) {
   const held = list.filter((s) => !s.off);
   const detail = h('section', { class: 'cal-detail' },
     h('h2', {}, dateLabel(sel), sel === today && h('span', { class: 'today-badge' }, '오늘')),
+    holidayName(sel) && h('p', { class: 'hol-note' }, `${holidayName(sel)} (공휴일)`),
     past && held.length > 0 && h('p', { class: 'help' }, `수업 ${held.length}개 · 모두 ${held.reduce((a, s) => a + s.present, 0)}명 출석`),
     list.length
       ? list.map((s) => {
@@ -311,12 +323,13 @@ function renderCalendar(today) {
           h('div', { class: 'ci-head' },
             h('b', {}, s.name),
             h('span', {}, [store.timeOn(p, store.parseDate(sel).getDay()), p.teacher && `${p.teacher} 강사`].filter(Boolean).join(' · '))),
-          s.off ? h('div', { class: 'ci-status' }, '휴강')
+          s.off ? h('div', { class: 'ci-status' }, offLong(s.reason))
             : past ? [
               h('div', { class: 'ci-status' }, h('strong', {}, s.present), ` / ${s.total}명 출석`, h('small', {}, ` (${rate}%)`)),
               h('div', { class: 'bar', role: 'img', 'aria-label': `출석률 ${rate}%` }, h('span', { style: `width:${rate}%` })),
             ]
             : h('div', { class: 'ci-status muted' }, `수업 예정 · ${s.total}명`),
+          !s.off && h('div', { class: 'ci-count' }, sessionLabel(s.name, sel)),
           sel === today && !s.off && h('button', { class: 'btn small', onclick: () => { ui.program = s.name; ui.view = 'check'; ui.query = ''; render(); } }, '출석 받기'));
       })
       : h('p', { class: 'help' }, '이날은 수업이 없습니다.'));
@@ -344,7 +357,8 @@ let countEl;
 function renderCheck(today) {
   const p = state.programs[ui.program];
   const members = store.membersOf(ui.program);
-  const isOff = p.off?.includes(today);
+  const offWhy = store.offReason(ui.program, today);
+  const isOff = !!offWhy;
   const notToday = !!p.days?.length && !p.days.includes(new Date().getDay());
 
   countEl = h('div', { class: 'count' });
@@ -362,7 +376,9 @@ function renderCheck(today) {
       state.device && h('div', { class: 'device' }, state.device),
       h('button', { class: 'btn gear', onclick: openCalendar }, '달력'),
       h('button', { class: 'btn gear', onclick: openAdmin }, '관리')),
-    isOff && h('div', { class: 'banner' }, '오늘은 휴강일로 등록되어 있습니다.'),
+    isOff && h('div', { class: 'banner' }, offWhy === '휴강'
+      ? '오늘은 휴강일로 등록되어 있습니다.'
+      : `오늘은 ${offWhy}(공휴일)이라 휴강으로 표시됩니다. 수업을 했다면 그대로 출석을 받으면 됩니다.`),
     !isOff && notToday && h('div', { class: 'banner' }, `이 수업은 ${daysText(p.days)}요일 수업입니다. 오늘 출석이 맞는지 확인해 주세요.`),
     h('main', { class: 'check' },
       h('section', { class: 'results' },
@@ -658,6 +674,8 @@ function programBox(name) {
   const box = h('div', { class: 'box prog-box', style: colorVars(name) });
   const teacherInput = h('input', { class: 'input', value: p.teacher || '', placeholder: '강사 이름', onchange: (e) => store.updateProgram(name, { teacher: e.target.value.trim() }) });
   const upcomingOff = (p.off || []).filter((d) => d >= dateKey());
+  const holidayCb = h('input', { type: 'checkbox', checked: !!p.holidayClass, style: 'width:22px;height:22px',
+    onchange: (e) => store.updateProgram(name, { holidayClass: e.target.checked }) });
   box.append(
     h('div', { class: 'prog-head' },
       h('h3', {}, name),
@@ -681,6 +699,14 @@ function programBox(name) {
           ? `다가오는 휴강 ${upcomingOff.length}일: ${upcomingOff.slice(0, 6).map((d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`).join(', ')}${upcomingOff.length > 6 ? ' …' : ''}`
           : '다가오는 휴강일 없음')),
     h('div', { class: 'row' },
+      h('span', { class: 'label' }, '수업 횟수'),
+      h('span', { class: 'help', style: 'margin:0' }, monthCounts(name))),
+    h('div', { class: 'row' },
+      h('span', { class: 'label' }, '공휴일'),
+      state.holidaysOff
+        ? h('label', { style: 'display:flex;gap:8px;align-items:center' }, holidayCb, '공휴일에도 이 수업을 함 (체크하지 않으면 공휴일은 자동으로 휴강)')
+        : h('span', { class: 'help', style: 'margin:0' }, '공휴일 자동 휴강이 꺼져 있습니다 ([설정]에서 켤 수 있음)')),
+    h('div', { class: 'row' },
       h('button', { class: 'btn small', onclick: () => memberDialog(name) }, '명단 보기 · 고치기'),
       h('button', { class: 'btn small danger', onclick: async () => {
         if (await confirmBox('수업 삭제', `'${name}' 수업을 목록에서 지울까요?\n지난 출석 기록은 남아 있어 같은 이름으로 명단을 다시 불러오면 이어집니다.`, '삭제', true)) {
@@ -689,6 +715,17 @@ function programBox(name) {
         }
       } }, '수업 삭제')));
   return box;
+}
+
+/** '11월 8회(공휴일 등 1회 제외) · 12월 9회 · 1월 8회' */
+function monthCounts(program) {
+  if (!state.programs[program].days?.length) return '수업 요일을 정하면 달마다 수업 횟수가 나옵니다';
+  const now = new Date();
+  return [0, 1, 2].map((k) => {
+    const month = dateKey(new Date(now.getFullYear(), now.getMonth() + k, 1)).slice(0, 7);
+    const { held, offCount } = sessions(program, month, 1);
+    return `${Number(month.slice(5))}월 ${held.length}회${offCount ? `(${offCount}회 쉼)` : ''}`;
+  }).join(' · ');
 }
 
 /** 달력에서 휴강일 여러 날을 한 번에 고르기 */
@@ -711,6 +748,13 @@ async function offDaysDialog(name) {
       const key = `${month}-${String(d).padStart(2, '0')}`;
       const wd = (startPad + d - 1) % 7;
       const classDay = !hasDays || p.days.includes(wd);
+      const hol = state.holidaysOff && !p.holidayClass ? holidayName(key) : null;
+      if (hol && !picked.has(key)) {
+        // 공휴일은 이미 자동으로 쉬므로 고를 필요가 없다
+        cells.push(h('div', { class: 'off-day hol' + (classDay ? ' class-day' : ''), title: hol, 'aria-label': `${dateLabel(key)} ${hol} 공휴일 자동 휴강` },
+          h('span', {}, d), h('small', {}, '공휴일')));
+        continue;
+      }
       cells.push(h('button', {
         type: 'button',
         class: 'off-day' + (classDay ? ' class-day' : '') + (picked.has(key) ? ' on' : '') + (key === dateKey() ? ' today' : ''),
@@ -855,7 +899,9 @@ function tabGrid(panel) {
   const program = ui.gridProgram;
   const p = state.programs[program];
   const dates = classDates(program, ui.gridMonth, 1);
-  const off = new Set(p.off || []);
+  const why = Object.fromEntries(dates.map((d) => [d, store.offReason(program, d)]));
+  const off = new Set(dates.filter((d) => why[d]));
+  const heldCount = sessions(program, ui.gridMonth, 1).held.length;
   const members = store.membersOf(program, { includeInactive: true }).filter((m) => m.active || dates.some((d) => store.getRecord(d, m.id)));
   const dup = store.duplicateNames(members);
 
@@ -866,7 +912,8 @@ function tabGrid(panel) {
           names.map((n) => h('option', { value: n, selected: n === program }, n)))),
       h('label', { class: 'field' }, '달',
         h('input', { type: 'month', value: ui.gridMonth, onchange: (e) => { if (e.target.value) { ui.gridMonth = e.target.value; render(); } } }))),
-    h('p', { class: 'help' }, '칸을 누르면 출석(○)과 결석이 바뀝니다. 지난 날짜를 고칠 때 쓰세요.'));
+    h('p', { class: 'help' }, '칸을 누르면 출석(○)과 결석이 바뀝니다. 지난 날짜를 고칠 때 쓰세요.'),
+    dates.length > 0 && h('p', { class: 'count-note' }, `이 달 수업 ${heldCount}회` + (dates.length - heldCount ? ` (휴강·공휴일 ${dates.length - heldCount}회 제외)` : '')));
 
   if (!dates.length) {
     panel.append(h('div', { class: 'box' }, h('p', {}, '이 달에 표시할 수업 날짜가 없습니다. [명단 · 수업] 탭에서 수업 요일을 선택해 주세요.')));
@@ -875,8 +922,8 @@ function tabGrid(panel) {
   const table = h('table', { class: 'sheet' },
     h('thead', {}, h('tr', {},
       h('th', { class: 'name' }, `이름 (${members.length})`),
-      dates.map((d) => h('th', { class: off.has(d) ? 'off' : '' }, `${Number(d.slice(8))}`, h('br'), off.has(d) ? '휴강' : WEEKDAYS[store.parseDate(d).getDay()])),
-      h('th', {}, '계'))),
+      dates.map((d) => h('th', { class: off.has(d) ? 'off' : '', title: why[d] || '' }, `${Number(d.slice(8))}`, h('br'), off.has(d) ? offShort(why[d]) : WEEKDAYS[store.parseDate(d).getDay()])),
+      h('th', {}, '계', h('br'), `/${heldCount}`))),
     h('tbody', {}, members.map((m) => {
       let total = 0;
       const cells = dates.map((d) => {
@@ -976,9 +1023,26 @@ function tabSettings(panel) {
           ui.unlocked = false; ui.view = 'check'; ui.program = null;
           render();
         } }, '모든 기록 지우기'))),
+    holidayBox(),
     retentionBox(),
     diagnosticsBox(),
     h('p', { class: 'help' }, `출석부 앱 버전 ${APP_VERSION}. 이 앱은 명단과 출석 기록을 이 기기 안에만 저장하며 외부 서버로 보내지 않습니다(보내는 기능 자체가 막혀 있습니다). 저장 항목: 이름, 전화번호 뒷 4자리, 수업 이름, 출석 시각.`));
+}
+
+function holidayBox() {
+  const cb = h('input', { type: 'checkbox', checked: state.holidaysOff, style: 'width:24px;height:24px',
+    onchange: (e) => { state.holidaysOff = e.target.checked; store.save(); render(); } });
+  const today = dateKey();
+  const lastYear = Number(HOLIDAYS_UNTIL.slice(0, 4));
+  const soonEnd = today >= `${lastYear}-10-01`; // 마지막 해 10월부터 다음 해 정보가 필요하다고 알림
+  const upcoming = Object.entries(HOLIDAYS).filter(([d]) => d >= today).slice(0, 8);
+  return h('div', { class: 'box' },
+    h('h3', {}, '공휴일 자동 휴강'),
+    h('label', { style: 'display:flex;gap:10px;align-items:center;font-size:18px;margin:8px 0' }, cb, '공휴일·대체공휴일·선거일에는 모든 수업을 휴강으로 표시'),
+    h('p', {}, `수업마다 [명단 · 수업]에서 '공휴일에도 이 수업을 함'을 체크하면 그 수업만 예외가 됩니다. 공휴일 정보는 ${lastYear}년 12월까지 들어 있습니다.`),
+    soonEnd && h('p', { class: 'notes' }, `${lastYear + 1}년 공휴일 정보가 아직 없습니다. 개발자에게 앱 업데이트를 요청해 주세요. 그동안은 [달력에서 고르기]로 직접 휴강일을 넣으면 됩니다.`),
+    upcoming.length > 0 && h('p', {}, '다가오는 공휴일: ' + upcoming.map(([d, n]) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))} ${n}`).join(', ')),
+    h('p', {}, '정부가 임시공휴일을 새로 정하면 [달력에서 고르기]로 그 날짜를 휴강으로 넣어 주세요.'));
 }
 
 function retentionBox() {

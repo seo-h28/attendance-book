@@ -1,3 +1,5 @@
+import { holidayName } from './holidays.js';
+
 // 데이터 저장소: 이 기기(태블릿/PC)의 브라우저 안에만 저장된다.
 // 개인정보 최소화: 이름, 전화번호 뒷 4자리, 프로그램명만 보관한다.
 // 주소 끝에 ?demo 를 붙이면 체험 모드: 실제 데이터와 완전히 따로 저장된다
@@ -7,7 +9,8 @@ const KEY = isDemo ? 'chulseokbu.demo' : 'chulseokbu.v1';
 export const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 function empty() {
-  return { v: 1, device: '', pin: '', programs: {}, members: {}, records: {}, lastExport: 0 };
+  // holidaysOff: 공휴일에는 모든 수업을 쉬는 것으로 볼지 (수업별로 '공휴일에도 수업'을 켤 수 있음)
+  return { v: 1, device: '', pin: '', programs: {}, members: {}, records: {}, lastExport: 0, holidaysOff: true };
 }
 
 export let state = empty();
@@ -144,6 +147,18 @@ export function addProgram(name, init) {
   const p = ensureProgram(name, init);
   save();
   return p;
+}
+
+/**
+ * 그날 그 수업이 쉬는 이유. 쉬지 않으면 null.
+ * 담당자가 직접 정한 휴강일이 먼저, 그다음 공휴일.
+ */
+export function offReason(name, date) {
+  const p = state.programs[name];
+  if (!p) return null;
+  if (p.off?.includes(date)) return '휴강';
+  if (state.holidaysOff && !p.holidayClass) return holidayName(date);
+  return null;
 }
 
 /* 요일별 수업 시간: times = {요일번호: '10:40-11:30'}. 예전 데이터의 time 은 모든 요일 공통 시간으로 본다. */
@@ -289,7 +304,8 @@ export function daySummary(date) {
     if (!scheduled && !present) continue;
     // 총 인원: 지금 명단 + 그날 출석했지만 지금은 명단에서 빠진 분
     const total = all.filter((m) => m.active || (day[m.id] && !day[m.id].x)).length;
-    out.push({ name, off: !!p.off?.includes(date), present, total, time: timeOn(p, weekday) });
+    const reason = offReason(name, date);
+    out.push({ name, off: !!reason, reason, present, total, time: timeOn(p, weekday) });
   }
   // 그날 수업 시간 순서로 (시간이 없으면 뒤로)
   return out.sort((a, b) => (a.time || '99').localeCompare(b.time || '99') || a.name.localeCompare(b.name, 'ko'));

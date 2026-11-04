@@ -1,6 +1,6 @@
 // 출석부 엑셀 만들기 (월별 또는 분기별)
 import { S, colName, writeXlsx } from './xlsx.js';
-import { state, membersOf, duplicateNames, getRecord, dateKey, parseDate, WEEKDAYS, exportData, scheduleText } from './store.js';
+import { state, membersOf, duplicateNames, getRecord, dateKey, parseDate, WEEKDAYS, exportData, scheduleText, offReason } from './store.js';
 import { backupSheet } from './roster.js';
 
 /** 기간 안의 수업 날짜: 수업 요일 + 실제 출석 기록이 있는 날 */
@@ -21,10 +21,25 @@ export function classDates(program, startMonth, months) {
   return [...dates].sort();
 }
 
+/**
+ * 실제 수업 횟수: 수업 날짜 중 휴강·공휴일을 뺀 날.
+ * 단, 쉬는 날이어도 출석 기록이 있으면 수업을 한 것으로 센다.
+ */
+export function sessions(program, startMonth, months) {
+  const dates = classDates(program, startMonth, months);
+  const ids = membersOf(program, { includeInactive: true }).map((m) => m.id);
+  const heldOn = (d) => !offReason(program, d) || ids.some((id) => getRecord(d, id));
+  const held = dates.filter(heldOn);
+  return { dates, held, offCount: dates.length - held.length };
+}
+
 function programSheet(program, startMonth, months) {
   const p = state.programs[program] || { days: [], off: [] };
   const dates = classDates(program, startMonth, months);
-  const off = new Set(p.off || []);
+  // 담당자가 정한 휴강일 + 공휴일
+  const why = Object.fromEntries(dates.map((d) => [d, offReason(program, d)]));
+  const off = new Set(dates.filter((d) => why[d]));
+  const heldCount = sessions(program, startMonth, months).held.length;
   // 현재 명단 + 기간 안에 출석 기록이 있는 예전 명단
   const members = membersOf(program, { includeInactive: true }).filter(
     (mb) => mb.active || dates.some((d) => getRecord(d, mb.id)),
@@ -50,6 +65,7 @@ function programSheet(program, startMonth, months) {
     scheduleText(p),
     p.teacher ? `${p.teacher} 강사` : '',
     `등록 ${members.filter((x) => x.active).length}명`,
+    `수업 ${heldCount}회` + (dates.length - heldCount ? ` (휴강·공휴일 ${dates.length - heldCount}회 제외)` : ''),
   ].filter(Boolean);
   rows[1] = [{ v: info.join('  /  '), s: S.info }];
   merges.push(`A2:${lastColName}2`);
@@ -66,13 +82,13 @@ function programSheet(program, startMonth, months) {
     for (let k = i; k < j; k++) {
       head1[FIRST + k] = { v: k === i ? `${Number(month.slice(5))}월` : '', s: S.header };
       const d = parseDate(dates[k]);
-      head2[FIRST + k] = { v: `${d.getDate()}\n${off.has(dates[k]) ? '휴강' : WEEKDAYS[d.getDay()]}`, s: off.has(dates[k]) ? S.off : S.header };
+      head2[FIRST + k] = { v: `${d.getDate()}\n${off.has(dates[k]) ? (why[dates[k]] === '휴강' ? '휴강' : '공휴') : WEEKDAYS[d.getDay()]}`, s: off.has(dates[k]) ? S.off : S.header };
     }
     if (j - i > 1) merges.push(`${colName(FIRST + i)}3:${colName(FIRST + j - 1)}3`);
     i = j;
   }
   head1[totalCol] = { v: '출석', s: S.header };
-  head2[totalCol] = { v: '횟수', s: S.header };
+  head2[totalCol] = { v: `/ ${heldCount}회`, s: S.header };
   rows[2] = head1;
   rows[3] = head2;
 

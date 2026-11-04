@@ -1,5 +1,6 @@
 // 체험 모드용 가상 데이터. 실제 사람이 아닌 무작위로 만든 이름과 번호다.
 import { dateKey, memberId, PALETTE } from './store.js';
+import { holidayName } from './holidays.js';
 
 export const DEMO_PIN = '0000';
 
@@ -71,7 +72,7 @@ export function makeDemoData(seed = Date.now()) {
   for (let d = new Date(start); dateKey(d) <= today; d.setDate(d.getDate() + 1)) {
     const key = dateKey(d);
     for (const p of PROGRAMS) {
-      if (!p.days.includes(d.getDay()) || programs[p.name].off.includes(key)) continue;
+      if (!p.days.includes(d.getDay()) || programs[p.name].off.includes(key) || holidayName(key)) continue;
       const rate = key === today ? p.rate * 0.5 : p.rate - 0.1 + rand() * 0.2;
       const day = (records[key] ||= {});
       for (const m of Object.values(members)) {

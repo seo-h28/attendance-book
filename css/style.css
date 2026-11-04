@@ -504,3 +504,14 @@ table.xl td.act button { border: none; background: none; color: var(--danger); f
 table.xl td.act button.add { color: #217346; }
 table.xl tr.dup td { background: #fff8e1; }
 table.xl tr.new td { background: #f6fbf7; }
+
+/* ---------- 공휴일 · 수업 횟수 ---------- */
+.cal-hol { display: block; font-size: 11px; font-weight: 700; color: #c0392b; line-height: 1.2; word-break: keep-all; }
+.hol-note { margin: 0; color: #c0392b; font-weight: 700; }
+.off-day.hol { background: #fdecea; border-color: #f3b8b2; color: #c0392b; }
+.off-day.hol small { color: #c0392b; }
+.ci-count { font-size: 15px; color: var(--muted); }
+.count-note { margin: 0; font-weight: 700; font-size: 17px; }
+@media (max-width: 680px) {
+  .cal-hol { font-size: 0; }
+}
